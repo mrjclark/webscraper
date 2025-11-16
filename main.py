@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import sqlite3
 import time
 import getSkullList
-from dbcm import Database
+from dbcmSqlite import Database
 import dbSetup
 
 # Set database if not done yet
@@ -101,4 +101,3 @@ for skull in skull_names:
         conn.commit()
     time.sleep(1)  # polite delay
 
-conn.close()
