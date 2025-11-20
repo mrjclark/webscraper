@@ -1,103 +1,136 @@
-import requests
-from bs4 import BeautifulSoup
+import requests as req
+from bs4 import BeautifulSoup as bs
 import sqlite3
 import time
 import getSkullList
 from dbcmSqlite import Database
 import dbSetup
+import re
+import json
 
 # Set database if not done yet
 dbSetup.dbSetup('skul.db')
 
 # API endpoint
-URI = "https://skul.fandom.com/api.php"
-HEADERS = {"User-Agent": "SkulCrawler/1.0"}
-
-# Example skull list (replace with your crawler output)
-skull_names = getSkullList.main() 
-
-# Function to fetch and parse skull page
-def fetch_skull_data(skull_name):
-    params = {
+url = "https://skul.fandom.com/api.php"
+params = {
         "action": "parse",
-        "page": skull_name.replace(" ","_"),
+        "page": "Skulls",
         "prop": "text",
         "format": "json"
     }
-    resp = requests.get(URI, params=params, headers=HEADERS)
-    if not resp.ok:
-        return None
+headers = {"User-Agent": "SkulCrawler/1.0"}
 
-    html = resp.json()["parse"]["text"]["*"]
-    soup = BeautifulSoup(html, "html.parser")
+def getSoup(url,params,headers):
+    print("url= ",url," params= ",str(params)," headers= ",str(headers))
+    soup=bs(((req.get(url,params=params,headers=headers)).json())["parse"]["text"]["*"],'lxml')
+    time.sleep(1)
+    return soup
 
-    # Example parsing logic (depends on wiki infobox structure)
-    infobox = soup.find("table", {"class": "infobox"})
-    if not infobox:
-        return None
+def getSkulls():
+    params["page"]="Skulls"
+    soup = getSoup(url,params,headers) 
 
-    data = {"name": skull_name}
+    exclude = {"Balrog", "Harpy", "Guard Captain", "Slime"}
+    skulls=list()
+    for td in soup.find_all("td"):
+        for li in td.find_all("li"):
+            if li.a and "title" in li.a.attrs:
+                skullName = li.a["title"]
+                if skullName not in exclude:
+                    skulls.append(skullName)
+    return skulls
 
-    # Extract fields from infobox rows
-    for row in infobox.find_all("tr"):
-        header = row.find("th")
-        value = row.find("td")
-        if not header or not value:
-            continue
-        key = header.text.strip().lower()
-        val = value.text.strip()
+# Function to fetch and parse skull page
+def getSkullData(skullName):
+    skullData={"name":skullName,"description":"","skullType":"","damageType":"","skullInfo":"","basicAttackInfo":"","passiveSkill":"","swapSkillName":"","swapSkillInfo":"","activeSkill":[]}
+    params["page"]= skullName.replace(" ","_")
+    soup = getSoup(url,params,headers) 
+    
+    # Get Description
+    try:
+        skullData["description"]=soup.h3.find_next("i").get_text(strip=True)
+    except AttributeError:
+        skullData["description"]="MISSING"
+        print(f"The description for ? is missing",skullName)
 
-        if "rarity" in key:
-            data["rarity"] = val
-        elif "type" in key:
-            data["skull_type"] = val
-        elif "damage" in key:
-            data["damage_type"] = val
-        elif "passive" in key:
-            data["passive_skill"] = val
-        elif "swap" in key:
-            if "swap_skill1" not in data:
-                data["swap_skill1"] = val
-            else:
-                data["swap_skill2"] = val
-        elif "skill" in key:
-            # Collect all skills into lists
-            if "skill_names" not in data:
-                data["skill_names"] = []
-                data["skill_descriptions"] = []
-                data["skill_cooldowns"] = []
-            data["skill_names"].append(header.text.strip())
-            data["skill_descriptions"].append(val)
-            # Cooldowns may be embedded in val or separate cell
+    # Get Skull Type
+    try:
+        skullData["skullType"]=soup.find("div", {"data-source":"skull_type"}).find_next("div").get_text(strip=True)
+    except AttributeError:
+        skullData["description"]="MISSING"
+        print(f"The description for ? is missing",skullName)
 
-    # Flatten lists into strings for SQLite
-    for field in ["skill_names", "skill_descriptions", "skill_cooldowns"]:
-        if field in data:
-            data[field] = "; ".join(data[field])
+    # Get Damage Type
+    try:
+        skullData["damageType"]=soup.find("div", {"data-source":"damage_type"}).find_next("div").get_text(strip=True)
+    except AttributeError:
+        skullData["description"]="MISSING"
+        print(f"The description for ? is missing",skullName)
 
-    return data
+    # Get Skull Info
+    try:
+        skullData["skullInfo"]=soup.find("span", {"id":"Skull_Info"}).find_next("p").get_text(strip=True)
+    except AttributeError:
+        skullData["description"]="MISSING"
+        print(f"The description for ? is missing",skullName)
+    
+    # Get Basic Attack Info
+    try:
+        skullData["basicAttackInfo"]=soup.find("span", {"id":"Basic_Attack_Info"}).find_next("p").get_text(strip=True)
+    except AttributeError:
+        skullData["description"]="MISSING"
+        print(f"The description for ? is missing",skullName)
+    
+    # Get Passive Skill
+    try:
+        skullData["passiveSkill"]=soup.find(string=re.compile("Passive Skill")).find_next("li").get_text(strip=True)
+    except AttributeError:
+        skullData["description"]="MISSING"
+        print(f"The description for ? is missing",skullName)
 
-# Loop through skulls and insert into DB
-for skull in skull_names:
-    skull_data = fetch_skull_data(skull)
-    if skull_data:
-        cur.execute("""
-        INSERT OR REPLACE INTO skulls
-        (name, rarity, skull_type, damage_type, passive_skill,
-         swap_skill1, swap_skill2, skill_names, skill_descriptions, skill_cooldowns)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            skull_data.get("name"),
-            skull_data.get("rarity"),
-            skull_data.get("skull_type"),
-            skull_data.get("damage_type"),
-            skull_data.get("passive_skill"),
-            skull_data.get("swap_skill1"),
-            skull_data.get("swap_skill2"),
-            skull_data.get("skill_names"),
-            skull_data.get("skill_descriptions"),
-            skull_data.get("skill_cooldowns")
-        ))
-        conn.commit()
-    time.sleep(1)  # polite delay
+    # Get Swap Skill
+    try:
+        swapSkillData=soup.find(string=re.compile("Swap Skill")).find_parent("table")
+        for tr in swapSkillData.find_all("tr"):
+            tds = tr.find_all("td")
+            if not tds:
+                continue
+            if tds[0].get_text(strip=True)=="Skill Name":
+                continue
+            skullData["swapSkillName"]=tds[0].get_text(strip=True)
+            skullData["swapSkillInfo"]=tds[1].get_text(strip=True)
+    except AttributeError:
+        skullData["description"]="MISSING"
+        print(f"The description for ? is missing",skullName)
 
+    # Get Active Skills
+    try:
+        actSkillData=soup.find(string=re.compile("Activated Skills")).find_parent("table")
+        for tr in actSkillData.find_all("tr"):
+            tds=tr.find_all("td")
+            if not tds:
+                continue
+            if tds[0].get_text(strip=True)=="Skill Name":
+                continue
+            skullData["activeSkill"].append({"name":tds[0].get_text(strip=True),"info":tds[1].get_text(strip=True),"cooldown":tds[2].get_text(strip=True)})
+    except AttributeError:
+        skullData["description"]="MISSING"
+        print(f"The description for ? is missing",skullName)
+
+    # Send to database
+    print(skullData)
+    with open("skullData.json","a") as file:
+        file.write(json.dumps(skullData,indent=2))
+    with dbcm.Database('skul.db') as db:
+        db.execute("INSERT INTO SKULLS (skullName
+        ,description
+        --continue on
+        ) VALUES(?,?)
+        ON CONFLICT DO NOTHING;")
+
+
+if __name__ == '__main__':
+    skulls=getSkulls()
+    for skull in skulls:
+        getSkullData(skull)
