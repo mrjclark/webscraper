@@ -2,20 +2,39 @@ from dbcmSqlite import Database
 import sys
 
 def dbSetup (dbname):
+    # skullData={"name":skullName,"description":"","skullType":"","damageType":"","skullInfo":"","basicAttackInfo":"","passiveSkill":"","swapSkillName":"","swapSkillInfo":"","activeSkill":[]}
     with Database(dbname) as cur:
         # Skulls table
         cur.execute("""
         CREATE TABLE IF NOT EXISTS skulls (
             name TEXT PRIMARY KEY,
-            rarity TEXT,
-            skull_type TEXT,
-            damage_type TEXT,
-            passive_skill TEXT,
-            swap_skill1 TEXT,
-            swap_skill2 TEXT,
-            skill_names TEXT,
-            skill_descriptions TEXT,
-            skill_cooldowns TEXT
+            description TEXT,
+            skullType TEXT,
+            damageType TEXT,
+            skullInfo TEXT,
+            basicAttackInfo TEXT,
+            passiveSkill TEXT,
+            swapSkillName TEXT,
+            swapSkillInfo TEXT
+        )
+        """)
+        # Skills table
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS activatedSkills (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            info TEXT,
+            cooldown TEXT
+        )
+        """)
+        # Skull to Skull table
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS skullToSkills (
+            skull_name TEXT,
+            skill_id INTEGER,
+            FOREIGN KEY(skull_name) REFERENCES skull(name),
+            FOREIGN KEY(skill_id) REFERENCES activatedSkills(id),
+            PRIMARY KEY(skull_name, skill_id)
         )
         """)
         # Items table
